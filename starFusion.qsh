@@ -1,0 +1,105 @@
+#! /bin/csh -f
+# set echo
+##  qsub -q <queue> -w e -N <job_name> \
+##    -l h_vmem=<memory, e.g. 4G> -l h_rt=<time> -l s_rt=<time> \
+##    -pe smp <num_slots> -o <outputlogfile> -e <errorlogfile> <pathtoScript> <arg1> <arg2>
+
+##$ -q jrf.q
+#$ -w e -N StarFtx
+#$ -l h_vmem=7G
+#$ -pe smp 5 -j yes
+#$ -V -cwd
+##$ -t 1-12
+
+source /ifs/e63data/reis-filho/genomes/homo_sapiens/gVars.csh
+
+set R1=(`ls $1*.1.fastq.gz`)
+set R2=(`ls $1*.2.fastq.gz`)
+
+## INDEX=$((SGE_TASK_ID-1))
+## SGE_TASK_ID=${SGE_TASK_ID:-$3}
+#if ( ! $?SGE_TASK_ID ) then
+#setenv SGE_TASK_ID $3
+#endif 
+
+set STRAIN=`echo ${R1[$SGE_TASK_ID]} | awk '{n=split($0,arra,"/"); split(arra[n],brra,"."); print brra[1]}'`
+
+set OUTDIR=$2/${STRAIN}
+
+## verify or create $OUTDIR
+##if ( ! -d $OUTDIR  ) exit 1
+
+
+echo $NSLOTS
+echo $OUTDIR
+echo $STRAIN
+echo $SGE_TASK_ID
+echo ${R1[$SGE_TASK_ID]}
+echo ${R2[$SGE_TASK_ID]}
+echo $SHELL
+
+STAR-Fusion --left_fq ${R1[$SGE_TASK_ID]} --right_fq ${R2[$SGE_TASK_ID]} \
+	--genome_lib_dir $CTAT19/ \
+	--tmpdir $OUTDIR/tmp \
+	-O ${OUTDIR} --verbose_level 2
+
+if ( $status == 0 ) touch $OUTDIR/starFusion.run.ok
+
+awk '{OFS="\t"; print $6, $8}' $OUTDIR/star-fusion.fusion_candidates.final.abridged | tr ":" "\t" | awk '{OFS="\t"; print $1, $2, $4, $5, $6="AVG"}' | sed '/^L/d' > $OUTDIR/star-fusion.oncofuse.input.txt
+
+java -Xmx1G -jar /home/gularter/src/oncofuse-1.1.1/Oncofuse.jar -a hg19 $OUTDIR/star-fusion.oncofuse.input.txt "coord" - $OUTDIR/star-fusion.oncofuse.output.txt
+
+if ( $status == 0 ) touch $OUTDIR/star-fusion.oncofuse.ok
+
+awk '{OFS="\t"; print $7"--"$14, $0}' $OUTDIR/star-fusion.oncofuse.output.txt | sort -k1  > $OUTDIR/tmp.star-fusion.oncofuse.results.for.merging.txt
+sort -k1 $OUTDIR/star-fusion.fusion_candidates.final.abridged > $OUTDIR/tmp.star-fusion.fusion_candidates.final.abridged
+
+join -1 1 -2 1 $OUTDIR/tmp.star-fusion.fusion_candidates.final.abridged $OUTDIR/tmp.star-fusion.oncofuse.results.for.merging.txt > $OUTDIR/star-fusion.oncofuse.merged.output.txt
+
+if ( $status == 0 ) rm $OUTDIR/tmp*
+if ( $status == 0 ) touch $OUTDIR/star-fusion.oncofuse.merging.ok
+
+
+
+#STAR --genomeDir $STARG --readFilesCommand zcat --outReadsUnmapped Fastq \
+#    --readFilesIn ${R1[$SGE_TASK_ID]} ${R2[$SGE_TASK_ID]} --runThreadN $NSLOTS \
+#    --outSAMstrandField intronMotif \
+#    --outSAMattrRGline ID:${NAME} SM:${STRAIN}_${NAME}_${POOL} LB:${LIBTYPE} CN:"MSKCC-IGO" DS:"SalivaryGlandACC" PL:Illumina PG:STAR \
+#    --outFileNamePrefix $OUTDIR/ \
+#    --outSAMtype BAM SortedByCoordinate --chimOutType WithinBAM 
+
+
+# STAR --genomeDir ${STARG} --readFilesCommand zcat \
+#     --readFilesIn ${R1[$SGE_TASK_ID]} ${R2[$SGE_TASK_ID]} --runThreadN $NSLOTS \
+#    --outSAMattrRGline ID:${STRAIN} SM:${STRAIN}_01 LB:"RNAseq" CN:"MSKCC-IGO" DS:"SalivaryGlandACC" PL:Illumina PG:STAR \
+#     --twopassMode Basic \
+#     --outReadsUnmapped Fastq \
+#     --chimSegmentMin 12 \
+#     --chimJunctionOverhangMin 12 \
+#     --alignSJDBoverhangMin 10 \
+#     --alignMatesGapMax 200000 \
+#     --alignIntronMax 200000 \
+#     --chimSegmentReadGapMax parameter 3 \
+#     --alignSJstitchMismatchNmax 5 -1 5 5 \
+#     --limitBAMsortRAM 31532137230 \
+#     --outFileNamePrefix $OUTDIR/ \
+#     --outSAMtype BAM SortedByCoordinate 
+
+## if ( $? == 0 ) then
+##    touch $OUTDIR/Aligned.sortedByCoord.out.bam.ok
+## else 
+##    exit 2 
+## endif
+
+## sambamba index -t $NSLOTS -c $OUTDIR/Aligned.sortedByCoord.out.bam
+## if ( $status == 0 ) then
+##    touch $OUTDIR/Aligned.sortedByCoord.out.bam.bai.ok
+## else 
+##    exit 3
+## endif
+
+#cd $OUTDIR
+#STAR-Fusion --genome_lib_dir $CTAT19 \
+#    -J Chimeric.out.junction \
+#    --output_dir ./
+

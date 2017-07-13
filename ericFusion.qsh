@@ -1,0 +1,65 @@
+#! /bin/csh -f
+# set echo
+
+##  qsub -q <queue> -w e -N <job_name> \
+##    -l h_vmem=<memory, e.g. 4G> -l h_rt=<time> -l s_rt=<time> \
+##    -pe smp <num_slots> -o <outputlogfile> -e <errorlogfile> <pathtoScript> <arg1> <arg2>
+
+###$ -q jrf.q
+#$ -w e -N EricScript
+#$ -l h_vmem=6G
+#$ -pe smp 7 -j yes
+#$ -V -cwd
+###$ -t 1-43 -tc 4
+
+source /ifs/e63data/reis-filho/genomes/homo_sapiens/gVars.csh
+
+set R1=(`ls $1*.1.fastq.gz`)
+set R2=(`ls $1*.2.fastq.gz`)
+
+## INDEX=$((SGE_TASK_ID-1))
+## SGE_TASK_ID=${SGE_TASK_ID:-$3}
+#if ( ! $?SGE_TASK_ID ) then
+#setenv SGE_TASK_ID $3
+#endif 
+
+set SGE_TASK_ID=$3
+set STRAIN=`echo ${R1[$SGE_TASK_ID]} | awk '{n=split($0,arra,"/"); split(arra[n],brra,"."); print brra[1]}'`
+
+set OUTDIR=$2/${STRAIN}
+
+## verify or create $OUTDIR
+## if ( ! -d $OUTDIR  ) mkdir -p ${OUTDIR}
+
+echo "NCPU              " $NSLOTS
+echo "OUTPUT Directory  " $OUTDIR
+echo "Sample Name       " $STRAIN
+echo "Array Task ID     " $SGE_TASK_ID
+echo "R1 FASTQ file     " ${R1[$SGE_TASK_ID]}
+echo "R2 FASTQ file     " ${R2[$SGE_TASK_ID]}
+echo "shell used        " $SHELL
+
+
+/home/gularter/src/ericscript-0.5.5/ericscript.pl \
+    -db $ERIC83 \
+    -p $NSLOTS \
+    -name $OUTDIR \
+    -o $OUTDIR \
+    --refid homo_sapiens \
+    ${R1[$SGE_TASK_ID]}  ${R2[$SGE_TASK_ID]}
+
+if ( $status == 0 ) touch $OUTDIR/ericscript.run.ok
+
+awk '{OFS="\t"; print $3, $4, $6, $7}' $OUTDIR/*.results.filtered.tsv | sed -e '/.*Un.*/d' | sed -e '/.*B.*/d' | awk '{OFS="\t"; print "chr"$1, $2, "chr"$3, $4, $5="AVG"}' > $OUTDIR/eric.oncofuse.input.txt
+
+java -Xmx1G -jar /home/gularter/src/oncofuse-1.1.1/Oncofuse.jar -a hg38 $OUTDIR/eric.oncofuse.input.txt "coord" - $OUTDIR/eric.oncofuse.output.txt
+
+if ( $status == 0 ) touch $OUTDIR/eric.oncofuse.ok
+
+awk '{OFS="\t"; print $1"--"$2, $0}' $OUTDIR/*.results.filtered.tsv | sort -k1 > $OUTDIR/tmp.ericscript.results.for.merging.txt
+awk '{OFS="\t"; print $7"--"$14, $0}' $OUTDIR/eric.oncofuse.output.txt | sort -k1  > $OUTDIR/tmp.eric.oncofuse.results.for.merging.txt
+
+join -1 1 -2 1  $OUTDIR/tmp.ericscript.results.for.merging.txt  $OUTDIR/tmp.eric.oncofuse.results.for.merging.txt > $OUTDIR/ericScript.Oncofuse.merged.output.txt
+
+if ( $status == 0 ) touch rm $OUTDIR/tmp*txt 
+if ( $status == 0 ) touch $OUTDIR/eric.oncofuse.merging.ok

@@ -1,0 +1,56 @@
+#! /bin/csh -f
+# set echo
+
+##  qsub -q <queue> -w e -N <job_name> \
+##    -l h_vmem=<memory, e.g. 4G> -l h_rt=<time> -l s_rt=<time> \
+##    -pe smp <num_slots> -o <outputlogfile> -e <errorlogfile> <pathtoScript> <arg1> <arg2>
+
+#$ -q jrf.q
+#$ -w e -N MapSplice
+#$ -l h_vmem=6G
+#$ -pe smp 8 -o mapS.log -j y
+#$ -V -cwd
+#$ -t 1-43 -tc 4
+
+#<usage>
+# as array :
+# qsub ./discasm.qsh ../path/to/fastq/ ./path/to/output  
+# for single run
+# SGE_TASK_ID=1 NSLOTS=8 ./mapSplice.qsh ../path/to/fastq/ ./path/to/output
+#</usage>
+source /ifs/e63data/reis-filho/genomes/homo_sapiens/gVars.csh
+
+set R1=../fastq/AdCC12trim.1.fastq.gz
+set R2=../fastq/AdCC12trim.2.fastq.gz
+
+## INDEX=$((SGE_TASK_ID-1))
+## SGE_TASK_ID=${SGE_TASK_ID:-$3}
+#if ( ! $?SGE_TASK_ID ) then
+#setenv SGE_TASK_ID $3
+#endif 
+
+##set STRAIN=`echo ${R1[$SGE_TASK_ID]} | awk '{n=split($0,arra,"/"); split(arra[n],brra,"."); print brra[1]}'`
+
+set OUTDIR=$2/AdCC12trim
+
+## verify or create $OUTDIR
+if ( ! -d $OUTDIR  ) mkdir -p ${OUTDIR} ; endif
+
+set UNCOMPRESSED_R1=`basename ${R1} .gz`
+set UNCOMPRESSED_R2=`basename ${R2} .gz`
+
+gzip -cd ${R1} > $UNCOMPRESSED_R1
+gzip -cd ${R2} > $UNCOMPRESSED_R2
+
+python /home/gularter/src/MapSplice-v2.2.1/mapsplice.py \
+       -1 $UNCOMPRESSED_R1 \
+       -2 $UNCOMPRESSED_R2 \
+       -c ${HSA}/Sequence/Chromosomes/ \
+       -x $BWT \
+       -p $NSLOTS \
+       --fusion \
+       -o $OUTDIR/ 2> $OUTDIR/run_log.txt
+
+## cleaning up
+if ( $status == 0) rm $UNCOMPRESSED_R1 $UNCOMPRESSED_R2 ; endif
+

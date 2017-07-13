@@ -1,0 +1,71 @@
+#! /bin/csh -f
+
+##  qsub -q <queue> -w e -N <job_name> \
+##    -l h_vmem=<memory, e.g. 4G> -l h_rt=<time> -l s_rt=<time> \
+##    -pe smp <num_slots> -o <outputlogfile> -e <errorlogfile> <pathtoScript> <arg1> <arg2>
+
+##$ -q jrf.q
+#$ -w e -N gmapFusion
+#$ -l h_vmem=6G
+#$ -pe smp 5 -j y
+#$ -V -cwd
+###$ -t 1-43 -tc 4
+
+
+source /ifs/e63data/reis-filho/genomes/homo_sapiens/gVars.csh
+
+set R1=(`ls $1*.1.fastq.gz`)
+set R2=(`ls $1*.2.fastq.gz`)
+
+## INDEX=$((SGE_TASK_ID-1))
+## SGE_TASK_ID=${SGE_TASK_ID:-$3}
+#if ( ! $?SGE_TASK_ID ) then
+#setenv SGE_TASK_ID $3
+#endif 
+
+set STRAIN=`echo ${R1[$SGE_TASK_ID]} | awk '{n=split($0,arra,"/"); split(arra[n],brra,"."); print brra[1]}'`
+
+set OUTDIR=$2/${STRAIN}_gmap_Ftx
+
+echo Sample           :  $STRAIN
+echo Sample R1 path   :  ${R1[$SGE_TASK_ID]}
+echo Sample R2 path   :  ${R1[$SGE_TASK_ID]}
+echo Output Directory :  $OUTDIR
+echo shell used       :  $SHELL
+
+
+## verify or create $OUTDIR
+if ( ! -d $OUTDIR  ) mkdir -p ${OUTDIR}
+
+setenv TRINITY_HOME ~/anaconda3/pkgs/trinity-2.1.1-6/bin
+## setenv TRINITY_HOME /home/gularter/src/trinityrnaseq
+
+/home/gularter/src/GMAP-fusion/GMAP-fusion --CPU $NSLOTS\
+    --transcripts $CTAT19/ref_annot.cdna \
+    --genome_lib_dir $CTAT19/ \
+    --left_fq ${R1[$SGE_TASK_ID]} \
+    --right_fq ${R2[$SGE_TASK_ID]} \
+    --output $OUTDIR --verbose_level 2
+
+if ( $status == 0 ) touch $OUTDIR/gmap-fusions.ok
+
+awk '{OFS="\t"; print $7, $8, $10, $11, $5="AVG"}' $OUTDIR/GMAP-fusion.final | sed '/chr/d' > $OUTDIR/gmap-fusions.oncofuse.input.txt
+
+java -Xmx1G -jar /home/gularter/src/oncofuse-1.1.1/Oncofuse.jar -a hg19 $OUTDIR/gmap-fusion.oncofuse.input.txt "coord" - $OUTDIR/gmap-fusion.oncofuse.output.txt
+
+if ( $status == 0 ) touch $OUTDIR/gmap-fusion.oncofuse.ok
+
+#if ( $? == 0 ) then
+#    touch $OUTDIR/Alignment.bam.ok
+#else 
+#    exit 2 
+#endif
+
+#sambamba index -t $NSLOTS -c $OUTDIR/Aligned.sortedByCoord.out.bam
+#if ( $? == 0 ) then
+#    touch $OUTDIR/Aligned.sortedByCoord.out.bam.bai.ok
+#else 
+#    exit 3
+#endif
+
+## awk '{OFS="\t"; 

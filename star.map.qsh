@@ -1,0 +1,86 @@
+#!/bin/csh -f
+
+##  qsub -q <queue> -w e -N <job_name> \
+##    -l h_vmem=<memory, e.g. 4G> -l h_rt=<time> -l s_rt=<time> \
+##    -pe smp <num_slots> -o <outputlogfile> -e <errorlogfile> <pathtoScript> <arg1> <arg2>
+
+#$ -q jrf.q
+#$ -w e -N StarMap
+#$ -l h_vmem=6G
+#$ -pe smp 8 -j yes
+#$ -V -cwd
+#$ -t 1-43 -tc 4
+
+## #$ -S /bin/sh
+## <usage>
+#if [ $# -gt 2 ] 
+#then
+#    echo "This script expects the directory name and output directory as first,"
+#    echo " and second arguments, respectively"
+#    echo "Fastq files are standard from Illumina <SampleID>_<LibraryID/Index_LANE_...fastq.gz>"
+#    echo " and that the fastq for R1/R2 are in the same directory. Without array support, "
+#    echo " multiple files can be processed through a for loop placing an index {0..N} as the"
+#    echo " third argument e.g."
+#    echo ""
+#    echo "sbatch --array=0-<NumLib> star.map.slq /path/to/fastq/ /path/to/output/"
+#    echo "for i in {0..N} ; do sbatch star.map.slq /path/to/fastq/ /path/to/output/ $i ; done"
+#    exit 1
+#fi
+
+## </usage>
+
+source /ifs/e63data/reis-filho/genomes/homo_sapiens/gVars.csh
+## set -e -x
+
+set R1=(`ls $1*.1.fastq.gz`)
+set R2=(`ls $1*.2.fastq.gz`)
+
+## INDEX=$((SGE_TASK_ID-1))
+## SGE_TASK_ID=${SGE_TASK_ID:-$3}
+
+
+
+
+set STRAIN=`echo ${R1[$SGE_TASK_ID]} | awk '{n=split($0,arra,"/"); split(arra[n],brra,"."); print brra[1]}'`
+
+set OUTDIR=$2/${STRAIN}
+
+## verify or create $OUTDIR
+if ( ! -e $OUTDIR )  mkdir -p $OUTDIR
+
+
+
+
+
+
+
+
+
+## standard run
+#STAR --genomeDir $STARG --readFilesCommand zcat --outReadsUnmapped Fastq \
+#    --readFilesIn ${R1[$SGE_TASK_ID]} ${R2[$SGE_TASK_ID]} --runThreadN $NSLOTS \
+#    --outSAMstrandField intronMotif \
+#    --outSAMattrRGline ID:${NAME} SM:${STRAIN}_${NAME}_${POOL} LB:${LIBTYPE} CN:"MSKCC-IGO" DS:"SalivaryGlandACC" PL:Illumina PG:STAR \
+#    --outFileNamePrefix $OUTDIR/ \
+#    --outSAMtype BAM SortedByCoordinate --chimOutType WithinBAM 
+
+## run for fusion detection
+STAR --genomeDir ${CTAT19/ref_genome.fa.star.idx/} --readFilesCommand zcat \
+     --readFilesIn ${R1[$SGE_TASK_ID]} ${R2[$SGE_TASK_ID]} --runThreadN $NSLOTS \
+     --outSAMattrRGline ID:${STRAIN} SM:${STRAIN}_01 LB:"RNAseq" CN:"MSKCC-IGO" DS:"FusionDetections" PL:Illumina PG:STAR \
+     --twopassMode Basic \
+     --outReadsUnmapped Fastq \
+     --chimSegmentMin 12 \
+     --chimJunctionOverhangMin 12 \
+     --alignSJDBoverhangMin 10 \
+     --alignMatesGapMax 200000 \
+     --alignIntronMax 200000 \
+     --chimSegmentReadGapMax parameter 3 \
+     --alignSJstitchMismatchNmax 5 -1 5 5 \
+     --limitBAMsortRAM 31532137230 \
+     --outFileNamePrefix $OUTDIR/ \
+     --outSAMtype BAM SortedByCoordinate 
+
+if ( $status == 0 )  touch $OUTDIR/Aligned.sortedByCoord.out.bam.ok
+
+sambamba index -t $NSLOTS -c $OUTDIR/Aligned.sortedByCoord.out.bam

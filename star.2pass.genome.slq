@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# -----------------------[SLURM : START]---------------------------
+# -- run name --
+#SBATCH --job-name=2PassGenome
+
+#  -- email preferences --
+#SBATCH --mail-user=rodrigo.gularte@ulg.ac.be
+#SBATCH --mail-type=FAIL
+#     (ALL = BEGIN, END, FAIL, REQUEUE)
+
+# -- output prefex
+#SBATCH --output="STAR2PG-%j.out"
+#     %j     Job allocation number.
+#     %N     Main node name.  
+
+
+# -- time requierements --
+##SBATCH --time=5:00:00
+# "days-hours:minutes:seconds"
+
+# ---- Resources ----
+#SBATCH --ntasks=1 --ntasks-per-node=1 --mem-per-cpu=85000
+
+# -----------------------[SLURM : END]---------------------------
+
+set -e
+
+echo " # ==================  Generate a 2pass Star Genome Index ================== # "
+STAR --runMode genomeGenerate \
+    --genomeDir ./ --genomeFastaFiles genome.fa \
+    --sjdbGTFfile Grcm38.genes.gtf --sjdbOverhang  100 \
+    --sjdbFileChrStartEnd SJ.Pass1.sjdb \
+    --runThreadN $SLURM_JOB_CPUS_PER_NODE \
+    --limitGenomeGenerateRAM 90194313216 
+
+## Gb  Bit (Kb = 1024)
+##  84  90194313216
+## 124 133143986176
+
+## We generate an annotated star genome index for the 2pass method described by 
+##  Engstrom et al. 2013 (Online at http://www.ncbi.nlm.nih.gov/pubmed/24185836, 
+##  rev. 2014.07.28).  For this we need an *.sjdb file with the splice junctions
+##  identified in our samples.  The companion script provided make.sjdb.sh, can
+##  creates this file by merging all available sjdb.out.tab files into one large
+##  splice junction database (here as : SJ.Pass1.sjdb).  We use Grcm38.genes.gtf
+##  i.e. the Ensembl Genes 75 GTF for Grcm38 to have a genome annotation as well.
+##  number of threads is limited to one, with 64 gb of ram, allowing 10 gb for
+##  resource management.
+
+## This script needs to be executed in the directory where the 2pass genome
+##  index is desired
